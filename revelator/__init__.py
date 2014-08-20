@@ -18,6 +18,7 @@
 __version__ = '0.1'
 __author__ = 'Michael DeHaan'
 
+import shlex
 import yaml
 import StringIO
 
@@ -39,7 +40,7 @@ REVEAL_HEADER = """
 
                 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 
-                <link rel="stylesheet" href="css/reveal.min.css">
+                <link rel="stylesheet" href="css/reveal.css">
                 <link rel="stylesheet" href="css/theme/default.css" id="theme">
 
                 <!-- For syntax highlighting -->
@@ -88,6 +89,7 @@ REVEAL_FOOTER = """
                                 progress: true,
                                 history: true,
                                 center: true,
+                                width: '%s',
 
                                 theme: Reveal.getQueryHash().theme, // available themes are in /css/theme
                                 transition: Reveal.getQueryHash().transition || 'default', // default/cube/page/concave/zoom/linear/fade/none
@@ -129,7 +131,7 @@ class Deck(object):
            transition = 'linear',
            fragment = None,
            frag_class = "",
-           background = '#000000'    
+           background = '#000000',
        )
        fh = open(self.filename, 'r')
        self.data = yaml.load(fh.read())
@@ -179,18 +181,18 @@ class Deck(object):
    def write_footer(self, data):
        ''' Write the reveal JS footer '''
 
-       self.io.write(REVEAL_FOOTER)
+       self.io.write(REVEAL_FOOTER % data.get('width','960'))
 
-   def write_slide(self, slide_data, nested=False):
+   def write_slide(self, slide_data, nested=False, recursive=False):
        ''' Logic to write any given slide '''
 
        slide_io = StringIO.StringIO()
 
-       # begin section
-       if not nested:
-           slide_io.write("<section data-background='%(background)s' data-transition='%(transition)s'>\n" % (self.defaults))
-       else:
-           slide_io.write("<section>\n")
+       if not recursive:
+           if not nested:
+               slide_io.write("<section data-background='%(background)s' data-transition='%(transition)s'>\n" % (self.defaults))
+           else:
+               slide_io.write("<section>\n")
 
        # for each element in the slide
        for elem in slide_data:
@@ -200,57 +202,78 @@ class Deck(object):
 
            for (k,v) in elem.iteritems():
 
+               parts = shlex.split(k)
+               tag = parts[0]
+               extra_style = ""
+               if len(parts) > 1:
+                   for part in parts[1:]:
+                       if '=' in part:
+                           (style, style_value) = part.split('=', 1)
+                       else:
+                           style = part
+                           style_value = ""
+                       extra_style = "%s: %s; %s" % (style, style_value, extra_style)
             
-               if k in [ 'ol', 'ul' ] :
+               if tag in [ 'ol', 'ul' ] :
 
                    # ordered lists
-                   slide_io.write("<%s>" % k) 
+                   slide_io.write('<%s style="%s">' % (tag, extra_style)) 
                    for v2 in v:
-                       slide_io.write("<br><li %s>%s</li>" % (self.defaults['frag_class'], v2))
-                   slide_io.write("</%s>" % k)
+                       # recursive tags
+                       if isinstance(v2, list):
+                           value = self.write_slide(v2, recursive=True)
+                       else:
+                           value = v2
+                       slide_io.write("<br><li %s>%s</li>" % (self.defaults['frag_class'], value))
+                   slide_io.write("</%s>" % tag)
 
                else:
 
                    # regular tags
-                   start_key = "<%s %s>\n" % (k, self.defaults['frag_class'])
-                   end_key = "</%s>\n" % k
-                   value = v
+                   start_key = '<%s style="%s" %s>\n' % (tag, extra_style, self.defaults['frag_class'])
+                   end_key = "</%s>\n" % tag
+
+                   # recursive tags
+                   if tag != 'nested' and isinstance(v, list):
+                       value = self.write_slide(v, recursive=True)
+                   elif tag == 'nested':
+                       start_key = ''
+                       end_key = ''
+                       value = self.write_slides(v, nested=True)
+                   else:
+                       value = v
 
                    # special handling
-                   if k == 'class_notes':
+                   if tag == 'class_notes':
                        # class notes
                        start_key = '<aside class=\'notes\'>\n'
                        end_key = '\n</aside>'
 
-                   elif k == 'code':
-                       start_key = "<pre><code contenteditable %s>\n" % (self.defaults['frag_class'])
-                       end_key = "\n</pre></code>\n"
+                   elif tag == 'code':
+                       start_key = '<pre><code style="%s" %s>\n' % (extra_style, self.defaults['frag_class'])
+                       end_key = "\n</code></pre>\n"
 
-                   elif k == 'link':
+                   elif tag == 'link':
                        (name, link) = v
-                       start_key = "<p><a href='%s' %s>\n" % (link, self.defaults['frag_class'])
+                       start_key = "<p><a href='%s' style='%s' %s>\n" % (link, extra_style, self.defaults['frag_class'])
                        end_key = "\n</a></p>\n"
                        value = name
 
-                   elif k == 'image':
-                       start_key = "<p><img src='%s' style='border:0px;background-color:%s' %s>" % (v, self.defaults['background'], self.defaults['frag_class'])
-                       end_key = "</p>"
+                   elif tag == 'image':
+                       start_key = "<img src='%s' style='border:0px;background-color:%s;%s' %s>" % (v, self.defaults['background'], extra_style, self.defaults['frag_class'])
+                       end_key = ""
                        value = ""
 
-                   elif k == 'quote':
-                       start_key = '<blockquote %s>' % self.defaults['frag_class']
+                   elif tag == 'quote':
+                       start_key = '<blockquote style="%s" %s>' % (extra_style, self.defaults['frag_class'])
                        end_key = '</blockquote>'
 
-                   elif k == 'nested':
-                       start_key = ''
-                       end_key = ''
-                       value = self.write_slides(v, nested=True)
-
                    slide_io.write("%s%s%s" % (start_key, value, end_key))
-     
-       # end section
 
-       slide_io.write("</section>")
+       if not recursive:
+           # end section
+           slide_io.write("</section>\n")
+
        return slide_io.getvalue()
 
    def compute_fragment_class(self, defaults):
