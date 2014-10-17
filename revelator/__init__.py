@@ -224,7 +224,7 @@ class Deck(object):
                            value = self.write_slide(v2, recursive=True)
                        else:
                            value = v2
-                       slide_io.write("<br><li %s>%s</li>" % (self.defaults['frag_class'], value))
+                       slide_io.write("<li %s>%s</li>" % (self.defaults['frag_class'], value))
                    slide_io.write("</%s>" % tag)
 
                else:
