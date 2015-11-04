@@ -240,6 +240,11 @@ class Deck(object):
                        start_key = ''
                        end_key = ''
                        value = self.write_slides(v, nested=True)
+                   elif tag == 'raw':
+                       print("raw value is: %s" % v)
+                       start_key = ''
+                       end_key = ''
+                       value = v
                    else:
                        value = v
 
